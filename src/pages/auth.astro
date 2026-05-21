@@ -1,0 +1,68 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+<BaseLayout title="The Boys Tipping · Sign in" renderPrototype={false}>
+  <section class="auth-page">
+    <div class="card card-pad auth-card">
+      <span class="eyebrow accent">Account</span>
+      <h1 id="auth-title" style="font-size:44px;margin-top:6px">Sign in</h1>
+      <p class="muted" id="auth-copy" style="margin-top:8px">Use your Neon Auth account to access your tips and groups.</p>
+
+      <form id="auth-form" class="col" style="gap:14px;margin-top:24px">
+        <label>
+          <span class="field-label">Name</span>
+          <input class="input" id="auth-name" name="name" autocomplete="name" placeholder="Your name" />
+        </label>
+        <label>
+          <span class="field-label">Email</span>
+          <input class="input" id="auth-email" name="email" type="email" autocomplete="email" required placeholder="you@example.com" />
+        </label>
+        <label>
+          <span class="field-label">Password</span>
+          <input class="input" id="auth-password" name="password" type="password" autocomplete="current-password" required minlength="8" placeholder="At least 8 characters" />
+        </label>
+
+        <button class="btn btn-primary" id="auth-submit" type="submit">Sign in</button>
+      </form>
+
+      <div id="auth-session" class="hidden" style="margin-top:24px">
+        <div class="callout good">
+          <span class="avatar" id="auth-session-initials">?</span>
+          <div style="flex:1">
+            <span class="label">Signed in</span>
+            <div class="who" id="auth-session-name">Account</div>
+            <div class="what" id="auth-session-email"></div>
+          </div>
+        </div>
+        <div class="row" style="gap:10px;margin-top:16px;flex-wrap:wrap">
+          <a class="btn btn-primary" href="/tips">Go to tips</a>
+          <button class="btn" id="auth-sign-out" type="button">Sign out</button>
+        </div>
+      </div>
+
+      <p class="muted" style="font-size:14px;margin-top:18px">
+        <span id="auth-switch-copy">Don't have an account?</span>
+        <button class="btn btn-ghost btn-sm" id="auth-mode" type="button">Create one</button>
+      </p>
+
+      <p class="pill bad hidden" id="auth-error" style="margin-top:16px"></p>
+      <p class="pill hidden" id="auth-status" style="margin-top:16px"></p>
+    </div>
+  </section>
+
+  <script>
+    import "../scripts/auth-page";
+  </script>
+
+  <style>
+    .auth-page {
+      display: grid;
+      min-height: min(680px, calc(100vh - 190px));
+      place-items: center;
+    }
+
+    .auth-card {
+      width: min(520px, 100%);
+    }
+  </style>
+</BaseLayout>

@@ -1,0 +1,75 @@
+---
+import "../styles/app.css";
+
+const { title = "The Boys Tipping · NRL", renderPrototype = true } = Astro.props;
+---
+<!doctype html>
+<html lang="en" data-theme="light" data-density="regular">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>{title}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,500;12..96,600;12..96,700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style is:global>
+      a.topnav-link,
+      a.tabbar-btn,
+      a.btn {
+        text-decoration: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header class="topnav">
+        <div class="topnav-inner">
+          <a class="brand" href="/" style="color:inherit;text-decoration:none">
+            <span class="brand-mark">TB</span>
+            <span>The Boys Tipping</span>
+            <small> · NRL</small>
+          </a>
+
+          <nav class="topnav-links" aria-label="Primary">
+            <a class="topnav-link" data-view="home" href="/">Home</a>
+            <a class="topnav-link" data-view="profile" href="/tips">Tips</a>
+            <a class="topnav-link" data-view="groups" href="/groups">Groups</a>
+          </nav>
+
+          <a class="btn btn-ghost btn-sm" href="/auth" style="text-decoration:none" data-account-link>
+            <span class="row" style="gap:8px"><span class="avatar sm" data-account-initials>?</span><span data-account-name>Sign in</span></span>
+          </a>
+        </div>
+      </header>
+
+      <main class="app-main" id={renderPrototype ? "app" : undefined}>
+        {!renderPrototype && <slot />}
+      </main>
+
+      <nav class="tabbar" aria-label="Mobile primary">
+        <a class="tabbar-btn" data-view="home" href="/">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 4l9 6.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1Z"/></svg>
+          Home
+        </a>
+        <a class="tabbar-btn" data-view="profile" href="/tips">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4h6l1 4-2 6h-4l-2-6 1-4Z"/><path d="M5 20l3-4h8l3 4"/></svg>
+          Tips
+        </a>
+        <a class="tabbar-btn" data-view="groups" href="/groups">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="9" r="3.2"/><circle cx="17" cy="11" r="2.5"/><path d="M3 19c.8-3 3.2-5 6-5s5.2 2 6 5"/><path d="M14 19c.5-2.2 2-3.5 4-3.5s3 1 3.5 3"/></svg>
+          Groups
+        </a>
+      </nav>
+
+    </div>
+
+    <script>
+      import "../scripts/session";
+    </script>
+    {renderPrototype && (
+      <script>
+        import "../scripts/app";
+      </script>
+    )}
+  </body>
+</html>

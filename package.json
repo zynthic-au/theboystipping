@@ -1,0 +1,30 @@
+{
+  "name": "the-boys-tipping",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "node scripts/migrate.mjs",
+    "db:migrate:dev": "DOTENV_CONFIG_PATH=.env.development node -r dotenv/config scripts/migrate.mjs",
+    "db:baseline:dev": "ALLOW_DEV_BASELINE=true DOTENV_CONFIG_PATH=.env.development node -r dotenv/config scripts/baseline-dev-migrations.mjs",
+    "db:seed:dev": "ALLOW_DEV_SEED=true DOTENV_CONFIG_PATH=.env.development node -r dotenv/config scripts/seed-dev.mjs",
+    "db:setup:dev": "npm run db:migrate:dev && npm run db:seed:dev",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "@astrojs/node": "^10.1.1",
+    "@neondatabase/neon-js": "^0.6.1-beta",
+    "@neondatabase/serverless": "^1.1.0",
+    "@tanstack/query-core": "^5.100.11",
+    "astro": "^6.3.5",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2",
+    "drizzle-kit": "^0.31.10"
+  }
+}
