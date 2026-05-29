@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build && cp -R public/. dist/client/",
+    "build": "astro build && node ./scripts/copy-public.mjs",
     "preview": "astro preview",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.mjs",
