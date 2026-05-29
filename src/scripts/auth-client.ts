@@ -47,3 +47,50 @@ export function getInitials(name: string) {
     .map((part) => part[0]?.toUpperCase())
     .join("") || "?";
 }
+
+export type CachedAuthUser = {
+  id?: string;
+  name?: string | null;
+  email?: string | null;
+  initials?: string | null;
+};
+
+declare global {
+  interface Window {
+    __tbtAuthUser?: CachedAuthUser | null;
+  }
+}
+
+export function readCachedAuthUser(): CachedAuthUser | null {
+  if (window.__tbtAuthUser) return window.__tbtAuthUser;
+
+  try {
+    const cached = JSON.parse(localStorage.getItem(getStorageKey("authUser")) || "null") as CachedAuthUser | null;
+    removeLegacyStorageKey("authUser");
+    return cached?.id ? cached : null;
+  } catch {
+    localStorage.removeItem(getStorageKey("authUser"));
+    removeLegacyStorageKey("authUser");
+    return null;
+  }
+}
+
+export function writeCachedAuthUser(user: CachedAuthUser | null) {
+  if (!user?.id) {
+    localStorage.removeItem("tbt.authUser");
+    localStorage.removeItem(getStorageKey("authUser"));
+    window.__tbtAuthUser = null;
+    return;
+  }
+
+  const cachedUser = {
+    id: user.id,
+    name: user.name || getDisplayName(user),
+    email: user.email,
+    initials: user.initials || getInitials(getDisplayName(user)),
+  };
+
+  removeLegacyStorageKey("authUser");
+  localStorage.setItem(getStorageKey("authUser"), JSON.stringify(cachedUser));
+  window.__tbtAuthUser = cachedUser;
+}

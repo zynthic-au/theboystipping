@@ -1,7 +1,10 @@
 ---
 import "../styles/app.css";
 
-const { title = "The Boys Tipping · NRL", renderPrototype = true } = Astro.props;
+const { title = "The Boys Tipping", renderPrototype = true } = Astro.props;
+const isDev = import.meta.env.DEV;
+const appEnv = import.meta.env.PUBLIC_APP_ENV || import.meta.env.MODE || "development";
+const authStorageKey = `tbt.${appEnv}.authUser`;
 ---
 <!doctype html>
 <html lang="en" data-theme="light" data-density="regular">
@@ -27,7 +30,7 @@ const { title = "The Boys Tipping · NRL", renderPrototype = true } = Astro.prop
           <a class="brand" href="/" style="color:inherit;text-decoration:none">
             <span class="brand-mark">TB</span>
             <span>The Boys Tipping</span>
-            <small> · NRL</small>
+            {isDev && <span class="brand-env-tag">Development</span>}
           </a>
 
           <nav class="topnav-links" aria-label="Primary">
@@ -39,6 +42,35 @@ const { title = "The Boys Tipping · NRL", renderPrototype = true } = Astro.prop
           <a class="btn btn-ghost btn-sm" href="/auth" style="text-decoration:none" data-account-link>
             <span class="row" style="gap:8px"><span class="avatar sm" data-account-initials>?</span><span data-account-name>Sign in</span></span>
           </a>
+          <script is:inline define:vars={{ authStorageKey }}>
+            (function () {
+              try {
+                var raw = localStorage.getItem(authStorageKey) || localStorage.getItem("tbt.authUser");
+                if (!raw) return;
+                var user = JSON.parse(raw);
+                if (!user || !user.id) return;
+
+                window.__tbtAuthUser = user;
+
+                var name = user.name || (user.email && user.email.split("@")[0]) || "Account";
+                var initials = user.initials;
+                if (!initials) {
+                  initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map(function (part) {
+                    return part[0].toUpperCase();
+                  }).join("") || "?";
+                }
+
+                var link = document.currentScript && document.currentScript.previousElementSibling;
+                if (!link || !link.matches("[data-account-link]")) return;
+
+                link.href = "/auth";
+                var initialsEl = link.querySelector("[data-account-initials]");
+                var nameEl = link.querySelector("[data-account-name]");
+                if (initialsEl) initialsEl.textContent = initials;
+                if (nameEl) nameEl.textContent = name;
+              } catch (_) {}
+            })();
+          </script>
         </div>
       </header>
 

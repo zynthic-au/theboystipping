@@ -1,13 +1,22 @@
-import { getAuthClient, getDisplayName, getInitials, getStorageKey, hasAuthConfig, removeLegacyStorageKey } from "./auth-client";
+import {
+  getAuthClient,
+  getDisplayName,
+  getInitials,
+  hasAuthConfig,
+  readCachedAuthUser,
+  writeCachedAuthUser,
+  type CachedAuthUser,
+} from "./auth-client";
 
 const protectedPathPrefixes = ["/tips", "/groups"];
 const pathname = window.location.pathname;
+const SESSION_RETRIES = 4;
+const SESSION_RETRY_MS = 100;
 
-type SessionUser = { id?: string; name?: string | null; email?: string | null; initials?: string | null };
+type SessionUser = CachedAuthUser;
 
 declare global {
   interface Window {
-    __tbtAuthUser?: SessionUser | null;
     __tbtSessionReady?: Promise<SessionUser | null>;
   }
 }
@@ -32,27 +41,51 @@ function setAccountUi(user: SessionUser | null) {
 }
 
 function cacheUser(user: SessionUser | null) {
-  if (!user) {
-    localStorage.removeItem("tbt.authUser");
-    localStorage.removeItem(getStorageKey("authUser"));
-    window.__tbtAuthUser = null;
-    return;
+  writeCachedAuthUser(user);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function resolveSessionUser() {
+  if (!hasAuthConfig()) return null;
+
+  const auth = getAuthClient();
+  let lastError: unknown;
+
+  for (let attempt = 0; attempt < SESSION_RETRIES; attempt++) {
+    try {
+      const result = await auth.getSession();
+      const user = result.data?.user ?? null;
+      if (user?.id) return user;
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (attempt < SESSION_RETRIES - 1) {
+      await sleep(SESSION_RETRY_MS * (attempt + 1));
+    }
   }
 
-  const cachedUser = {
-    id: user.id,
-    name: getDisplayName(user),
-    email: user.email,
-    initials: getInitials(getDisplayName(user)),
-  };
+  if (lastError) {
+    console.warn("Neon Auth session check failed after retries; keeping cached account if available.", lastError);
+  }
 
-  removeLegacyStorageKey("authUser");
-  localStorage.setItem(getStorageKey("authUser"), JSON.stringify(cachedUser));
-  window.__tbtAuthUser = cachedUser;
+  return null;
 }
 
 async function bootSession() {
+  const cached = readCachedAuthUser();
+
   if (!hasAuthConfig()) {
+    if (cached) {
+      setAccountUi(cached);
+      return cached;
+    }
+
     setAccountUi(null);
     if (isProtectedPath()) {
       console.warn("PUBLIC_NEON_AUTH_URL is not configured; auth-protected pages cannot be enforced yet.");
@@ -60,31 +93,34 @@ async function bootSession() {
     return null;
   }
 
-  let user: SessionUser | null = null;
+  const verified = await resolveSessionUser();
 
-  try {
-    const auth = getAuthClient();
-    const result = await auth.getSession();
-    user = result.data?.user ?? null;
-  } catch (error) {
-    console.error("Neon Auth session check failed", error);
-    cacheUser(null);
-    setAccountUi(null);
-
-    if (isProtectedPath()) {
-      window.location.href = `/auth?redirectTo=${encodeURIComponent(pathname + window.location.search)}&error=session`;
-    }
-    return null;
+  if (verified) {
+    cacheUser(verified);
+    setAccountUi(verified);
+    return verified;
   }
 
-  cacheUser(user);
-  setAccountUi(user);
+  if (cached) {
+    window.__tbtAuthUser = cached;
+    setAccountUi(cached);
+    return cached;
+  }
 
-  if (!user && isProtectedPath()) {
+  cacheUser(null);
+  setAccountUi(null);
+
+  if (isProtectedPath()) {
     window.location.href = `/auth?redirectTo=${encodeURIComponent(pathname + window.location.search)}`;
   }
 
-  return user;
+  return null;
+}
+
+const cachedUser = readCachedAuthUser();
+if (cachedUser) {
+  window.__tbtAuthUser = cachedUser;
+  setAccountUi(cachedUser);
 }
 
 window.__tbtSessionReady = bootSession();

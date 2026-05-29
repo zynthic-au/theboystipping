@@ -1,6 +1,6 @@
 import { MutationObserver, QueryClient } from "@tanstack/query-core";
 
-import { getStorageKey, removeLegacyStorageKey } from "./auth-client";
+import { getStorageKey, readCachedAuthUser } from "./auth-client";
 
 type Team = { code: string; name: string; city: string };
 type Match = { id: string; home: string; away: string; result: string | null; time: string };
@@ -63,8 +63,7 @@ const queryClient = new QueryClient({
 let user = getCurrentAuthUser();
 const initialRoute = getRouteState();
 
-let data: AppData | null = null;
-let loading = true;
+let data: AppData | null = readCachedAppState();
 let errorMessage = "";
 let modal: "create" | "join" | null = null;
 let teamDisplay: "name" | "code" = "name";
@@ -78,25 +77,29 @@ let state = {
   matrixRound: 0,
 };
 
+function emptyAppData(): AppData {
+  return { teams: [], rounds: [], groups: [], members: [], picks: {}, jokerRounds: [], currentRound: null };
+}
+
+if (data) syncRoundState();
+updateDocumentTitle();
+render();
 void boot();
 
 async function boot() {
-  render();
-
   try {
     user = await getReadyAuthUser();
-
-    if (shouldBootstrapUser(user)) {
-      await runApiMutation(["bootstrap", user!.id], "/api/bootstrap", { user });
-      markUserBootstrapped(user!);
-    }
 
     const cached = readCachedAppState();
     if (cached) {
       data = cached;
       syncRoundState();
-      loading = false;
       render();
+    }
+
+    if (shouldBootstrapUser(user)) {
+      await runApiMutation(["bootstrap", user!.id], "/api/bootstrap", { user });
+      markUserBootstrapped(user!);
     }
 
     data = await loadAppState({ forceNetwork: true });
@@ -106,20 +109,20 @@ async function boot() {
     if (!data) errorMessage = error instanceof Error ? error.message : "Failed to load app data";
     else console.warn("Could not refresh app data", error);
   } finally {
-    loading = false;
     setupTweaks();
     render();
   }
 }
 
 async function getReadyAuthUser() {
-  if (!window.__tbtSessionReady) return getCurrentAuthUser();
+  if (window.__tbtSessionReady) {
+    await Promise.race([
+      window.__tbtSessionReady.catch(() => undefined),
+      new Promise<void>((resolve) => window.setTimeout(resolve, SESSION_WAIT_MS)),
+    ]);
+  }
 
-  const timeout = new Promise<AuthUser | null>((resolve) => {
-    window.setTimeout(() => resolve(getCurrentAuthUser()), SESSION_WAIT_MS);
-  });
-
-  return (await Promise.race([window.__tbtSessionReady, timeout])) ?? null;
+  return getCurrentAuthUser();
 }
 
 async function fetchAppStateFromApi() {
@@ -178,16 +181,7 @@ function syncRoundState() {
 
 function getCurrentAuthUser(): AuthUser | null {
   if (window.__tbtAuthUser !== undefined) return window.__tbtAuthUser;
-
-  try {
-    const cached = JSON.parse(localStorage.getItem(getStorageKey("authUser")) || "null");
-    removeLegacyStorageKey("authUser");
-    return cached;
-  } catch {
-    localStorage.removeItem(getStorageKey("authUser"));
-    removeLegacyStorageKey("authUser");
-    return null;
-  }
+  return readCachedAuthUser();
 }
 
 function appStateCacheKey() {
@@ -382,20 +376,21 @@ function render() {
   const app = document.getElementById("app");
   if (!app) return;
 
-  if (loading) {
-    app.innerHTML = `<section class="card card-pad"><span class="eyebrow accent">Loading</span><h1>Getting your tipping data ready...</h1></section>`;
+  if (errorMessage && !data) {
+    app.innerHTML = `<section class="card card-pad"><span class="eyebrow accent">Database</span><h1>Could not load app data.</h1><p class="muted">${esc(errorMessage)}</p></section>`;
     return;
   }
 
-  if (errorMessage || !data) {
-    app.innerHTML = `<section class="card card-pad"><span class="eyebrow accent">Database</span><h1>Could not load app data.</h1><p class="muted">${esc(errorMessage || "Unknown error")}</p></section>`;
-    return;
+  const savedData = data;
+  if (!data) data = emptyAppData();
+  try {
+    if (state.view === "profile") app.innerHTML = profileView();
+    else if (state.view === "groups") app.innerHTML = groupsView();
+    else if (state.view === "group") app.innerHTML = groupView();
+    else app.innerHTML = homeView();
+  } finally {
+    data = savedData;
   }
-
-  if (state.view === "profile") app.innerHTML = profileView();
-  else if (state.view === "groups") app.innerHTML = groupsView();
-  else if (state.view === "group") app.innerHTML = groupView();
-  else app.innerHTML = homeView();
 
   if (modal) {
     app.insertAdjacentHTML("beforeend", modalView());
