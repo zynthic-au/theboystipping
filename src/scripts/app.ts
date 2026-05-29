@@ -1,9 +1,13 @@
 import { MutationObserver, QueryClient } from "@tanstack/query-core";
 
 import { getStorageKey, readCachedAuthUser } from "./auth-client";
+import { teamLogo } from "./team-logos";
 
 type Team = { code: string; name: string; city: string };
 type Match = { id: string; home: string; away: string; result: string | null; time: string };
+type H2HMatch = { date: string; home: string; away: string; homeScore: number; awayScore: number };
+type BookmakerOdds = { bookmaker: string; home: number; away: number };
+type MatchInsight = { history: H2HMatch[]; odds: BookmakerOdds[]; oddsAvailable: boolean };
 type Round = { id: string; n: number; label: string; status: string; closes: string; closesAt: string | null; matches: Match[] };
 type Member = {
   id: string;
@@ -71,9 +75,12 @@ let data: AppData | null = readCachedAppState();
 let loading = !data;
 let errorMessage = "";
 let modal: "create" | "join" | null = null;
+let matchInsights: Record<string, MatchInsight | "loading"> = {};
+let matchInsightsRequestKey = "";
 let teamDisplay: "name" | "code" = "name";
 let copiedJoinCode = "";
 const pendingTipSaves = new Map<string, number>();
+let pendingJokerSave = 0;
 let state = {
   view: initialRoute.view,
   tab: initialRoute.tab,
@@ -593,18 +600,121 @@ function picksPanel(current: Round) {
   const isLocked = current.status === "done";
   const armed = currentJokerRound() === current.n;
 
-  return `<div><div style="margin-bottom:18px"><div class="round-scroll">${data!.rounds.map((item) => `<button class="round-chip ${item.n === state.pickRound ? "active" : ""} ${item.n === currentJokerRound() ? "joker" : ""}" data-round="${item.n}">R${item.n}</button>`).join("")}</div></div><div class="row" style="margin-bottom:18px;justify-content:space-between;flex-wrap:wrap;gap:14px"><div><h2 style="margin-bottom:4px">${esc(current.label)}</h2><div class="muted" style="font-size:14px">${isLocked ? "Round closed." : `Closes ${esc(current.closes)} · ${remaining ? `${remaining} tips to go` : "All tips in"}`}</div></div>${!isLocked ? `<div class="joker-card ${armed ? "armed" : ""}" style="min-width:260px"><div class="joker-left"><span class="icon">${icon(20)}</span><div><div class="joker-title">${armed ? "Joker armed for this round" : "Use joker on this round"}</div><div class="joker-sub">${armed ? "Correct picks worth 2x points." : `${jokersLeft()} joker${jokersLeft() === 1 ? "" : "s"} left this season.`}</div></div></div><button class="swt" data-action="toggle-joker" data-on="${armed ? 1 : 0}" ${!armed && jokersLeft() <= 0 ? "disabled" : ""} aria-label="Toggle joker"></button></div>` : ""}</div><div class="col" style="gap:10px">${current.matches.map((match) => matchCard(match, myPicks[match.id], isLocked, armed)).join("")}</div></div>`;
+  void ensureMatchInsights(current.matches);
+
+  return `<div><div style="margin-bottom:18px"><div class="round-scroll">${data!.rounds.map((item) => `<button class="${roundChipClasses(item, state.pickRound)}" data-round="${item.n}">R${String(item.n).padStart(2, "0")}</button>`).join("")}</div></div><div class="row" style="margin-bottom:18px;justify-content:space-between;flex-wrap:wrap;gap:14px"><div><h2 style="margin-bottom:4px">${esc(current.label)}</h2><div class="muted" style="font-size:14px">${isLocked ? "Round closed." : `Closes ${esc(current.closes)} · ${remaining ? `${remaining} tips to go` : "All tips in"}`}</div></div>${!isLocked ? `<div class="joker-card ${armed ? "armed" : ""}" style="min-width:260px"><div class="joker-left"><span class="icon">${icon(20)}</span><div><div class="joker-title">${armed ? "Joker armed for this round" : "Use joker on this round"}</div><div class="joker-sub">${armed ? "Correct picks worth 2x points." : `${jokersLeft()} joker${jokersLeft() === 1 ? "" : "s"} left this season.`}</div></div></div><button class="swt" data-action="toggle-joker" data-on="${armed ? 1 : 0}" ${!armed && jokersLeft() <= 0 ? "disabled" : ""} aria-label="Toggle joker"></button></div>` : ""}</div><div class="col" style="gap:10px">${current.matches.map((match) => matchCard(match, myPicks[match.id], isLocked, armed)).join("")}</div></div>`;
 }
 
 function matchCard(match: Match, picked: string | undefined, locked: boolean, jokerRound: boolean) {
   const home = team(match.home);
   const away = team(match.away);
 
-  return `<div class="match ${jokerRound ? "joker" : ""}"><div class="match-meta"><div class="match-meta-left"><span>${esc(match.time)}</span>${jokerRound ? pill(`${icon(11)} Joker · 2x pts`, "joker") : ""}</div>${match.result ? `<span>FT · ${esc(match.result)}</span>` : locked ? `<span>Locked</span>` : ""}</div>${teamButton(match.id, home, match.home, "Home", picked, locked)}<div class="match-divider">vs</div>${teamButton(match.id, away, match.away, "Away", picked, locked)}</div>`;
+  return `<div class="match"><div class="match-meta"><div class="match-meta-left"><span>${esc(match.time)}</span>${jokerRound ? pill(`${icon(11)} Joker · 2x pts`, "joker") : ""}</div>${match.result ? `<span>FT · ${esc(match.result)}</span>` : locked ? `<span>Locked</span>` : ""}</div><div class="match-pick-row">${teamButton(match.id, home, match.home, "Home", picked, locked, jokerRound)}<div class="match-divider">vs</div>${teamButton(match.id, away, match.away, "Away", picked, locked, jokerRound)}</div>${matchInsightsPanel(match.home, match.away)}</div>`;
 }
 
-function teamButton(matchId: string, item: Team | undefined, code: string, side: string, picked?: string, locked = false) {
-  return `<button class="team-btn ${picked === code ? "picked" : ""}" data-pick-match="${esc(matchId)}" data-pick-team="${esc(code)}" ${locked ? "disabled" : ""}>${picked === code ? `<span class="check">✓</span>` : ""}<span class="team-code">${esc(code)} · ${side}</span><span class="team-name">${teamDisplay === "code" ? esc(code) : esc(item?.name || code)}</span><span class="team-full">${esc(item?.city || "")}</span></button>`;
+function matchInsightsPanel(home: string, away: string) {
+  const key = insightKey(home, away);
+  const insight = matchInsights[key];
+
+  if (insight === "loading") {
+    return `<aside class="match-insights"><div class="match-insights-block"><div class="match-insights-label">H2H</div><p class="match-insights-empty">…</p></div><div class="match-insights-divider" aria-hidden="true"></div><div class="match-insights-block"><div class="match-insights-label">Odds</div><p class="match-insights-empty">…</p></div></aside>`;
+  }
+
+  const data = insight ?? emptyMatchInsight();
+  const history = data.history.length
+    ? `<div class="match-history-wrap"><div class="match-history-head"><span class="match-history-head-date">Date</span><div class="match-history-scores"><span class="match-history-scores-label">Win</span><span class="match-history-scores-label">Loss</span></div></div><ul class="match-history">${data.history.map((item) => historyRow(item)).join("")}</ul></div>`
+    : `<p class="match-insights-empty">None found</p>`;
+
+  const odds = data.odds.length
+    ? `<div class="match-odds-wrap"><div class="match-odds-head"><span class="match-odds-head-book">Book</span><span class="match-odds-team">${esc(home)}</span><span class="match-odds-team">${esc(away)}</span></div><ul class="match-odds">${data.odds.map((item) => oddsRow(item)).join("")}</ul></div>`
+    : `<p class="match-insights-empty">${data.oddsAvailable ? "Unavailable" : "No API key"}</p>`;
+
+  return `<aside class="match-insights"><div class="match-insights-block"><div class="match-insights-label">Last 5 · H2H</div>${history}</div><div class="match-insights-divider" aria-hidden="true"></div><div class="match-insights-block"><div class="match-insights-label">Odds</div>${odds}</div></aside>`;
+}
+
+function historyRow(item: H2HMatch) {
+  const winner = item.homeScore > item.awayScore
+    ? { code: item.home, score: item.homeScore }
+    : item.awayScore > item.homeScore
+      ? { code: item.away, score: item.awayScore }
+      : null;
+  const loser = item.homeScore > item.awayScore
+    ? { code: item.away, score: item.awayScore }
+    : item.awayScore > item.homeScore
+      ? { code: item.home, score: item.homeScore }
+      : null;
+
+  const winCell = winner
+    ? historyScoreCell(winner.code, winner.score, "win")
+    : historyScoreCell(item.home, item.homeScore, "win", true);
+  const lossCell = loser
+    ? historyScoreCell(loser.code, loser.score, "loss")
+    : historyScoreCell(item.away, item.awayScore, "loss", true);
+
+  return `<li class="match-history-row"><span class="match-history-date">${esc(formatInsightDate(item.date))}</span><div class="match-history-scores">${winCell}${lossCell}</div></li>`;
+}
+
+function historyScoreCell(code: string, score: number, kind: "win" | "loss", draw = false) {
+  const cls = draw ? "match-history-score-cell draw" : kind === "win" ? "match-history-score-cell win" : "match-history-score-cell loss";
+  return `<span class="${cls}"><span class="match-history-team">${esc(code)}</span><span class="match-history-score">${score}</span></span>`;
+}
+
+function oddsRow(item: BookmakerOdds) {
+  return `<li class="match-odds-row"><span class="match-odds-book">${esc(shortBookmaker(item.bookmaker))}</span><span class="match-odds-price">${formatOdds(item.home)}</span><span class="match-odds-price">${formatOdds(item.away)}</span></li>`;
+}
+
+function shortBookmaker(name: string) {
+  return name.replace(/\s+(Australia|AU|Sports)?$/i, "").split(" ")[0] || name;
+}
+
+function formatInsightDate(value: string) {
+  return new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", year: "2-digit", timeZone: "UTC" }).format(new Date(value));
+}
+
+function formatOdds(value: number) {
+  return value.toFixed(2);
+}
+
+function emptyMatchInsight(): MatchInsight {
+  return { history: [], odds: [], oddsAvailable: false };
+}
+
+function insightKey(home: string, away: string) {
+  return `${home}:${away}`;
+}
+
+async function ensureMatchInsights(matches: Match[]) {
+  const requestKey = matches.map((item) => insightKey(item.home, item.away)).join("|");
+  if (!requestKey || matchInsightsRequestKey === requestKey) return;
+
+  matchInsightsRequestKey = requestKey;
+  matchInsights = Object.fromEntries(matches.map((item) => [insightKey(item.home, item.away), "loading"]));
+  render();
+
+  try {
+    const matchups = matches.map((item) => `${item.home}:${item.away}`).join(",");
+    const response = await fetch(`/api/match-insights?matchups=${encodeURIComponent(matchups)}`, { cache: "no-store" });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || response.statusText);
+
+    const nextInsights: Record<string, MatchInsight> = {};
+    for (const match of matches) {
+      const key = insightKey(match.home, match.away);
+      nextInsights[key] = payload.insights?.[key] ?? emptyMatchInsight();
+    }
+    matchInsights = nextInsights;
+  } catch (error) {
+    console.warn("Could not load match insights", error);
+    matchInsights = Object.fromEntries(matches.map((item) => [insightKey(item.home, item.away), emptyMatchInsight()]));
+  }
+
+  render();
+}
+
+function teamButton(matchId: string, item: Team | undefined, code: string, side: string, picked?: string, locked = false, jokerRound = false) {
+  const isPicked = picked === code;
+  const jokerRing = jokerRound && isPicked ? `<span class="joker-fire-ring" aria-hidden="true"><span class="joker-fire-ring-inner"></span></span>` : "";
+  return `<button class="team-btn${isPicked ? " picked" : ""}${jokerRound && isPicked ? " joker-tip" : ""}" data-pick-match="${esc(matchId)}" data-pick-team="${esc(code)}" ${locked ? "disabled" : ""}>${jokerRing}${isPicked ? `<span class="check">✓</span>` : ""}${teamLogo(code)}<span class="team-info"><span class="team-code">${esc(code)} · ${side}</span><span class="team-name">${teamDisplay === "code" ? esc(code) : esc(item?.name || code)}</span><span class="team-full">${esc(item?.city || "")}</span></span></button>`;
 }
 
 function jokerPanel() {
@@ -746,6 +856,15 @@ function emptyState(title: string, copy: string) {
 
 function authRequired() {
   return `<section class="card card-pad"><span class="eyebrow accent">Sign in required</span><h1>Connect an account to use this page.</h1><p class="muted">Tips, groups, joker rounds, and profile data are loaded from the database after authentication.</p><a class="btn btn-primary" href="/auth?redirectTo=${encodeURIComponent(window.location.pathname + window.location.search)}" style="text-decoration:none;margin-top:14px">Sign in</a></section>`;
+}
+
+function roundChipClasses(item: Round, selectedRound: number) {
+  const classes = ["round-chip", "num"];
+  if (item.n === selectedRound) classes.push("active");
+  if (item.n === data?.currentRound) classes.push("current");
+  if (item.status === "done") classes.push("done");
+  if (item.n === currentJokerRound()) classes.push("joker");
+  return classes.join(" ");
 }
 
 function currentRound() {
@@ -1001,16 +1120,16 @@ document.addEventListener("click", async (event) => {
   }
   if (target.dataset.action === "toggle-joker" && user?.id) {
     const nextRound = currentJokerRound() === state.pickRound ? null : state.pickRound;
-    await saveJoker(nextRound);
+    void saveJokerOptimistically(nextRound);
     return;
   }
   if (target.dataset.action === "disarm-joker" && user?.id) {
-    await saveJoker(null);
+    void saveJokerOptimistically(null);
     return;
   }
   if (target.dataset.armRound && user?.id) {
     const selected = Number(target.dataset.armRound);
-    await saveJoker(currentJokerRound() === selected ? null : selected);
+    void saveJokerOptimistically(currentJokerRound() === selected ? null : selected);
     return;
   }
   if (target.dataset.group) {
@@ -1115,11 +1234,70 @@ window.addEventListener("popstate", () => {
   render();
 });
 
-async function saveJoker(roundNumber: number | null) {
+async function saveJokerOptimistically(roundNumber: number | null) {
+  if (!user?.id || !data) return;
+
+  const version = (pendingJokerSave += 1);
+  const snapshot = snapshotJokerState();
+
+  applyLocalJokerRound(roundNumber);
+  render();
+
   try {
-    await runApiMutation(["joker-rounds", "save"], "/api/joker-rounds", { userId: user!.id, roundNumber });
-    await refreshAppState();
+    await runApiMutation(["joker-rounds", "save"], "/api/joker-rounds", { userId: user.id, roundNumber });
+    if (pendingJokerSave !== version) return;
+    void refreshAppStateInBackground();
   } catch (error) {
+    if (pendingJokerSave !== version) return;
+    restoreJokerState(snapshot);
+    render();
     alert(error instanceof Error ? error.message : "Failed to save joker round");
   }
+}
+
+function snapshotJokerState() {
+  if (!data || !user?.id) return { jokerRounds: [], jokerFlags: [] as { n: number; joker?: boolean }[] };
+
+  return {
+    jokerRounds: structuredClone(data.jokerRounds),
+    jokerFlags: data.rounds.map((item) => ({
+      n: item.n,
+      joker: data!.picks[item.n]?.[user!.id!]?.joker,
+    })),
+  };
+}
+
+function restoreJokerState(snapshot: ReturnType<typeof snapshotJokerState>) {
+  if (!data || !user?.id) return;
+
+  data.jokerRounds = snapshot.jokerRounds;
+  for (const { n, joker } of snapshot.jokerFlags) {
+    const entry = data.picks[n]?.[user.id];
+    if (!entry) continue;
+    if (joker) entry.joker = true;
+    else delete entry.joker;
+  }
+  writeCachedAppState(data);
+}
+
+function applyLocalJokerRound(roundNumber: number | null) {
+  if (!data || !user?.id) return;
+
+  data.jokerRounds = data.jokerRounds.filter((item) => item.isLocked);
+  if (roundNumber !== null) {
+    data.jokerRounds.push({ roundNumber, isLocked: false });
+  }
+
+  for (const roundItem of data.rounds) {
+    const userPicks = data.picks[roundItem.n]?.[user.id];
+    if (roundNumber === roundItem.n) {
+      const roundPicks = data.picks[roundItem.n] ??= {};
+      const entry = roundPicks[user.id] ??= { picks: {} };
+      entry.joker = true;
+    } else if (userPicks) {
+      delete userPicks.joker;
+    }
+  }
+
+  writeCachedAppState(data);
 }
