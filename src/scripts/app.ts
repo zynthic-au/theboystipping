@@ -46,6 +46,10 @@ declare global {
 }
 
 const APP_STATE_CACHE_TTL_MS = 30_000;
+// How long a cached snapshot can still be shown instantly while we refresh in
+// the background (stale-while-revalidate). Keeps navigation smooth even after
+// the freshness window has passed instead of dropping back to a blank screen.
+const APP_STATE_CACHE_MAX_AGE_MS = 24 * 60 * 60_000;
 const SESSION_WAIT_MS = 2_500;
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,6 +68,7 @@ let user = getCurrentAuthUser();
 const initialRoute = getRouteState();
 
 let data: AppData | null = readCachedAppState();
+let loading = !data;
 let errorMessage = "";
 let modal: "create" | "join" | null = null;
 let teamDisplay: "name" | "code" = "name";
@@ -109,6 +114,7 @@ async function boot() {
     if (!data) errorMessage = error instanceof Error ? error.message : "Failed to load app data";
     else console.warn("Could not refresh app data", error);
   } finally {
+    loading = false;
     setupTweaks();
     render();
   }
@@ -224,7 +230,13 @@ function readCachedAppState() {
     if (queryData) return queryData;
 
     const cached = JSON.parse(sessionStorage.getItem(appStateCacheKey()) || "null") as CachedAppData | null;
-    if (!cached || Date.now() - cached.savedAt > APP_STATE_CACHE_TTL_MS) return null;
+    if (!cached) return null;
+    // Drop genuinely ancient snapshots, but otherwise show stale data instantly
+    // and let boot() refresh it in the background (stale-while-revalidate).
+    if (Date.now() - cached.savedAt > APP_STATE_CACHE_MAX_AGE_MS) {
+      sessionStorage.removeItem(appStateCacheKey());
+      return null;
+    }
     queryClient.setQueryData(appStateQueryKey(), cached.data);
     return cached.data;
   } catch {
@@ -377,9 +389,17 @@ function render() {
   if (!app) return;
 
   if (errorMessage && !data) {
+    app.removeAttribute("aria-busy");
     app.innerHTML = `<section class="card card-pad"><span class="eyebrow accent">Database</span><h1>Could not load app data.</h1><p class="muted">${esc(errorMessage)}</p></section>`;
     return;
   }
+
+  if (loading && !data) {
+    app.setAttribute("aria-busy", "true");
+    app.innerHTML = skeletonView();
+    return;
+  }
+  app.removeAttribute("aria-busy");
 
   const savedData = data;
   if (!data) data = emptyAppData();
@@ -475,6 +495,49 @@ function updateDocumentTitle() {
   else if (state.view === "groups") document.title = `${suffix} · Groups`;
   else if (state.view === "group") document.title = `${suffix} · Group`;
   else document.title = `${suffix} · Home`;
+}
+
+function sk(style = "", cls = "") {
+  return `<span class="sk ${cls}" style="${style}" aria-hidden="true"></span>`;
+}
+
+function skeletonView() {
+  const body = state.view === "profile"
+    ? profileSkeleton()
+    : state.view === "groups"
+      ? groupsSkeleton()
+      : state.view === "group"
+        ? groupSkeleton()
+        : homeSkeleton();
+
+  return `<div class="skeleton" role="status" aria-live="polite"><span class="sr-only">Loading…</span>${body}</div>`;
+}
+
+function skCard(headWidth = "40%", lines = 3) {
+  const rows = Array.from({ length: lines }, () => `<div class="fix sk-fix">${sk("height:14px;width:54px")}${sk("height:14px;width:42%")}${sk("height:10px;width:16px")}${sk("height:14px;width:28%;margin-left:auto")}${sk("height:22px;width:62px;border-radius:3px")}</div>`).join("");
+  return `<div class="card card-pad"><div class="card-head">${sk(`height:20px;width:${headWidth}`)}${sk("height:12px;width:48px")}</div><div class="col" style="gap:10px">${rows}</div></div>`;
+}
+
+function homeSkeleton() {
+  const stats = Array.from({ length: 4 }, () => `<div class="stat">${sk("height:11px;width:70%")}${sk("height:34px;width:54px;margin-top:8px")}</div>`).join("");
+
+  return `<section class="hero"><div class="hero-title">${sk("height:12px;width:120px")}${sk("height:48px;width:90%;margin-top:6px")}${sk("height:48px;width:60%")}${sk("height:16px;width:80%;margin-top:8px")}<div class="row" style="margin-top:14px;gap:10px">${sk("height:42px;width:150px;border-radius:6px")}${sk("height:42px;width:120px;border-radius:6px")}</div></div><div class="hero-stats">${stats}</div></section><section class="grid grid-2">${skCard("50%", 4)}${skCard("40%", 3)}</section>`;
+}
+
+function profileSkeleton() {
+  return `<section><div class="row" style="gap:24px;align-items:center;margin-bottom:28px;flex-wrap:wrap">${sk("width:84px;height:84px;border-radius:20px")}<div style="flex:1;min-width:220px">${sk("height:12px;width:90px")}${sk("height:44px;width:60%;margin-top:8px")}<div class="row" style="gap:8px;margin-top:10px">${sk("height:26px;width:140px;border-radius:3px")}${sk("height:26px;width:110px;border-radius:3px")}</div></div><div class="row" style="gap:28px">${Array.from({ length: 3 }, () => `<div class="stat">${sk("height:11px;width:70px")}${sk("height:34px;width:50px;margin-top:8px")}</div>`).join("")}</div></div><div style="margin-bottom:24px">${sk("height:38px;width:280px;border-radius:8px")}</div><div class="col" style="gap:10px">${Array.from({ length: 5 }, () => `<div class="match sk-match">${sk("height:92px;border-radius:12px")}${sk("height:92px;border-radius:12px")}</div>`).join("")}</div></section>`;
+}
+
+function groupsSkeleton() {
+  const cards = Array.from({ length: 4 }, () => `<div class="group-card"><div class="group-card-head"><div>${sk("height:22px;width:160px")}${sk("height:12px;width:120px;margin-top:8px")}</div>${sk("height:24px;width:70px;border-radius:3px")}</div>${sk("height:14px;width:90%")}<div class="row" style="gap:8px">${Array.from({ length: 4 }, () => sk("width:24px;height:24px;border-radius:7px")).join("")}</div><div class="group-card-stats">${Array.from({ length: 3 }, () => `<div class="stat">${sk("height:11px;width:60%")}${sk("height:24px;width:40px;margin-top:8px")}</div>`).join("")}</div></div>`).join("");
+
+  return `<section><div class="row" style="justify-content:space-between;margin-bottom:28px;flex-wrap:wrap;gap:14px"><div>${sk("height:12px;width:90px")}${sk("height:44px;width:320px;margin-top:8px")}${sk("height:16px;width:80%;margin-top:8px")}</div><div class="row" style="gap:10px">${sk("height:42px;width:130px;border-radius:6px")}${sk("height:42px;width:140px;border-radius:6px")}</div></div><div class="grid grid-2">${cards}</div></section>`;
+}
+
+function groupSkeleton() {
+  const rows = Array.from({ length: 6 }, () => `<div class="lb-row">${sk("width:20px;height:20px")}${sk("width:36px;height:36px;border-radius:10px")}<div>${sk("height:15px;width:160px")}${sk("height:10px;width:120px;margin-top:6px")}</div><div></div>${sk("height:18px;width:44px;margin-left:auto")}</div>`).join("");
+
+  return `<section>${sk("height:30px;width:110px;border-radius:6px;margin-bottom:14px")}<div class="group-detail-head"><div>${sk("height:12px;width:90px")}${sk("height:50px;width:70%;margin-top:8px")}${sk("height:15px;width:90%;margin-top:10px")}<div class="row" style="gap:8px;margin-top:12px">${sk("height:26px;width:120px;border-radius:3px")}${sk("height:26px;width:150px;border-radius:3px")}</div></div><div class="group-detail-stats">${Array.from({ length: 3 }, () => `<div class="stat">${sk("height:11px;width:60px")}${sk("height:34px;width:50px;margin-top:8px")}</div>`).join("")}</div></div><div style="margin-bottom:18px">${sk("height:38px;width:260px;border-radius:8px")}</div><div class="card card-pad"><div class="card-head">${sk("height:20px;width:180px")}${sk("height:12px;width:90px")}</div><div class="lb">${rows}</div></div></section>`;
 }
 
 function homeView() {

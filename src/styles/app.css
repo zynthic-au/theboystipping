@@ -1180,6 +1180,61 @@ h2 { font-size: 28px; font-weight: 600; }
 .callout.good { background: color-mix(in oklab, var(--good) 12%, var(--bg-elev)); border-color: color-mix(in oklab, var(--good) 25%, transparent); }
 .callout.bad  { background: color-mix(in oklab, var(--bad) 10%, var(--bg-elev)); border-color: color-mix(in oklab, var(--bad) 22%, transparent); }
 
+/* ───── Skeleton loading ───── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes sk-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.sk {
+  display: block;
+  border-radius: 6px;
+  background-color: var(--bg-sunken);
+  background-image: linear-gradient(
+    90deg,
+    var(--bg-sunken) 0%,
+    color-mix(in oklab, var(--line-soft) 80%, var(--bg-elev)) 40%,
+    var(--bg-sunken) 80%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
+  animation: sk-shimmer 1.4s ease-in-out infinite;
+}
+
+.skeleton .card,
+.skeleton .group-card,
+.skeleton .fix,
+.skeleton .match,
+.skeleton .hero-stats {
+  pointer-events: none;
+}
+
+.skeleton .fix.sk-fix {
+  align-items: center;
+}
+
+.skeleton .match.sk-match {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sk { animation: none; }
+}
+
 /* App integration helpers */
 .hidden { display: none !important; }
 a.btn, a.topnav-link, a.tabbar-btn { text-decoration: none; }
